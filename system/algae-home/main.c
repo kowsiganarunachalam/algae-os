@@ -429,15 +429,27 @@ int main(void)
 		.events = POLLIN,
 	};
 	for (;;) {
+		if (wl_display_flush(app.display) < 0) {
+			if (errno != EAGAIN) {
+				perror("algae-home: flush Wayland requests");
+				break;
+			}
+			display_fd.events = POLLIN | POLLOUT;
+		} else {
+			display_fd.events = POLLIN;
+		}
 		int ready = poll(&display_fd, 1, 50);
 		if (ready < 0) {
 			if (errno == EINTR)
 				continue;
 			break;
 		}
-		if (ready > 0) {
+		if (ready > 0 && (display_fd.revents & POLLIN)) {
 			if (wl_display_dispatch(app.display) == -1)
 				break;
+		} else if (ready > 0 &&
+			   (display_fd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
+			break;
 		} else if (app.configured && !app.loading_done) {
 			draw(&app);
 		}
