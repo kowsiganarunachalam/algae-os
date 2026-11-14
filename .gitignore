@@ -1,0 +1,48 @@
+
+# ==============================
+# Buildroot
+# ==============================
+buildroot/
+
+# Build outputs
+build/
+output/
+*.img
+*.ext2
+*.ext4
+*.cpio
+*.dtb
+*.dtbo
+*.bin
+*.elf
+
+# Linux kernel build files
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+Module.symvers
+modules.order
+.config.old
+
+# Rust build artifacts
+target/
+**/target/
+Cargo.toml.orig
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+.DS_Store
