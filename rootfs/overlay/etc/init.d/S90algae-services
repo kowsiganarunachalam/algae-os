@@ -11,6 +11,7 @@ case "$1" in
             exit 0
         fi
 
+        /etc/init.d/S01algae-splash stop
         echo "Starting Algae Service Manager..."
 
         "$DAEMON" >> "$LOGFILE" 2>&1 &

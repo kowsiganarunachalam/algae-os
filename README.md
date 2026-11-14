@@ -17,7 +17,7 @@ QEMU ARM64 boots a Weston desktop with an Algae home screen and Rust service con
 ## QEMU ARM64 graphical image
 
 The `algae_qemu_defconfig` enables the QEMU virtio GPU kernel driver, eudev,
-and the Weston DRM compositor. Build and launch it in order:
+an early framebuffer splash, and the Weston DRM compositor. Build and launch it in order:
 
 ```sh
 make -C buildroot BR2_DEFCONFIG="$PWD/algae_qemu_defconfig" defconfig
@@ -29,7 +29,7 @@ make -C buildroot -j2
 In a second terminal, connect to QEMU's local display with
 `vncviewer 127.0.0.1:0`. The buildroot QEMU binary provides VNC and virtio GPU;
 the launcher keeps its serial console attached to the first terminal. Weston
-shows an animated algae-shaped loading mark for about 3.5 seconds, then opens
+shows an animated algae-shaped loading mark for about 5 seconds, then opens
 the Algae home screen. If display 0 is occupied, launch with
 `VNC_DISPLAY=1 ./scripts/run-qemu-graphical.sh` and connect to `127.0.0.1:1`.
 The Services tile explains service

@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="800" viewBox="0 0 1280 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#06252b"/>
+      <stop offset="1" stop-color="#0b403a"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a5f6bd"/>
+      <stop offset="1" stop-color="#31cb91"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="800" fill="url(#bg)"/>
+  <circle cx="1050" cy="150" r="180" fill="#3bdba1" opacity=".06"/>
+  <circle cx="180" cy="720" r="230" fill="#52bada" opacity=".05"/>
+  <g fill="none" stroke="#9cf1bd" stroke-width="12" stroke-linecap="round">
+    <path d="M640 414 C624 366 658 316 640 258 C629 220 642 184 640 160"/>
+  </g>
+  <g fill="url(#leaf)">
+    <path d="M638 380 C576 375 526 342 503 292 C557 294 610 319 638 380Z"/>
+    <path d="M642 350 C702 344 751 309 771 258 C717 263 665 288 642 350Z"/>
+    <path d="M639 310 C584 302 547 271 533 229 C581 235 622 259 639 310Z"/>
+    <path d="M642 278 C692 267 728 235 739 192 C694 200 656 225 642 278Z"/>
+    <path d="M640 238 C607 226 588 199 590 170 C618 183 636 205 640 238Z"/>
+    <path d="M642 207 C668 191 681 165 675 138 C652 155 641 179 642 207Z"/>
+  </g>
+  <g fill="#b7f6db" opacity=".8">
+    <circle cx="514" cy="230" r="7"/><circle cx="770" cy="208" r="5"/>
+    <circle cx="548" cy="168" r="4"/><circle cx="733" cy="326" r="6"/>
+  </g>
+  <text x="640" y="500" fill="#f0fbf6" font-family="DejaVu Sans, sans-serif" font-size="38" font-weight="600" letter-spacing="9" text-anchor="middle">ALGAE OS</text>
+  <text x="640" y="548" fill="#a7cdc0" font-family="DejaVu Sans, sans-serif" font-size="17" letter-spacing="3" text-anchor="middle">GROWING YOUR SPACE</text>
+  <text x="640" y="700" fill="#b5d8ce" font-family="DejaVu Sans, sans-serif" font-size="16" text-anchor="middle">Starting Algae OS</text>
+</svg>

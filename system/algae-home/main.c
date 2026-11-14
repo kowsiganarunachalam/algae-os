@@ -141,7 +141,7 @@ static void draw(struct app *app)
 	cairo_paint(cr);
 	cairo_pattern_destroy(gradient);
 	double elapsed = loading_seconds(app);
-	if (!app->loading_done && elapsed < 3.5) {
+	if (!app->loading_done && elapsed < 5.0) {
 		draw_loading(cr, w, h, elapsed);
 		cairo_destroy(cr);
 		cairo_surface_destroy(image);

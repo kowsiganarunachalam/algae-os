@@ -1,0 +1,48 @@
+#!/bin/sh
+
+PSPLASH=/usr/bin/psplash
+PSPLASH_WRITE=/usr/bin/psplash-write
+PIDFILE=/run/algae-psplash.pid
+PROGRESS_PIDFILE=/run/algae-psplash-progress.pid
+
+case "$1" in
+    start)
+        [ -x "$PSPLASH" ] && [ -e /dev/fb0 ] || exit 0
+        "$PSPLASH" -n &
+        echo $! > "$PIDFILE"
+        sleep 1
+        if [ -x "$PSPLASH_WRITE" ]; then
+            "$PSPLASH_WRITE" "MSG Starting Algae OS" 2>/dev/null || true
+            "$PSPLASH_WRITE" "PROGRESS 5" 2>/dev/null || true
+            (
+                progress=10
+                while [ "$progress" -le 85 ]; do
+                    sleep 1
+                    "$PSPLASH_WRITE" "PROGRESS $progress" 2>/dev/null || exit 0
+                    progress=$((progress + 5))
+                done
+            ) &
+            echo $! > "$PROGRESS_PIDFILE"
+        fi
+        ;;
+    stop)
+        if [ -f "$PROGRESS_PIDFILE" ]; then
+            kill "$(cat "$PROGRESS_PIDFILE")" 2>/dev/null || true
+            rm -f "$PROGRESS_PIDFILE"
+        fi
+        if [ -x "$PSPLASH_WRITE" ]; then
+            "$PSPLASH_WRITE" "PROGRESS 100" 2>/dev/null || true
+            "$PSPLASH_WRITE" "QUIT" 2>/dev/null || true
+        fi
+        if [ -f "$PIDFILE" ]; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null || true
+            rm -f "$PIDFILE"
+        fi
+        ;;
+    *)
+        echo "Usage: $0 {start|stop}" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

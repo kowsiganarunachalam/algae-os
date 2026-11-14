@@ -8,7 +8,7 @@ VNC_DISPLAY=${VNC_DISPLAY:-0}
 exec "$PROJECT_DIR/buildroot/output/host/bin/qemu-system-aarch64" \
     -M virt -cpu cortex-a53 -m 2048 -smp 2 \
     -kernel "$IMAGE_DIR/Image" \
-    -append 'rootwait root=/dev/vda console=ttyAMA0' \
+    -append 'rootwait root=/dev/vda console=ttyAMA0 vt.global_cursor_default=0' \
     -display "vnc=127.0.0.1:$VNC_DISPLAY" -serial mon:stdio \
     -device virtio-gpu-pci -device virtio-keyboard-pci \
     -device virtio-tablet-pci \
