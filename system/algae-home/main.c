@@ -422,8 +422,7 @@ int main(void)
 	app.toplevel = xdg_surface_get_toplevel(app.xdg_surface);
 	xdg_toplevel_set_title(app.toplevel, "Algae OS");
 	xdg_toplevel_set_app_id(app.toplevel, "org.algae.home");
-	if (app.seat)
-		wl_display_roundtrip(app.display);
+	/* The first commit causes Weston to send the initial xdg configure. */
 	wl_surface_commit(app.surface);
 	struct pollfd display_fd = {
 		.fd = wl_display_get_fd(app.display),
