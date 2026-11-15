@@ -1,0 +1,10 @@
+# Algae QEMU network setup. The QEMU runner pins this MAC address, and udev
+# exposes it as enx525400123456.
+auto lo
+iface lo inet loopback
+
+auto enx525400123456
+iface enx525400123456 inet dhcp
+  pre-up /etc/network/nfs_check
+  wait-delay 15
+  hostname $(hostname)

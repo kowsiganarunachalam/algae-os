@@ -12,6 +12,7 @@ exec "$PROJECT_DIR/buildroot/output/host/bin/qemu-system-aarch64" \
     -display "vnc=127.0.0.1:$VNC_DISPLAY" -serial mon:stdio \
     -device virtio-gpu-pci -device virtio-keyboard-pci \
     -device virtio-tablet-pci \
-    -netdev user,id=eth0 -device virtio-net-device,netdev=eth0 \
+    -netdev user,id=eth0 \
+    -device virtio-net-device,netdev=eth0,mac=52:54:00:12:34:56 \
     -drive "file=$IMAGE_DIR/rootfs.ext4,if=none,format=raw,id=hd0" \
     -device virtio-blk-device,drive=hd0 "$@"

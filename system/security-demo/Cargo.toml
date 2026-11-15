@@ -1,0 +1,12 @@
+[package]
+name = "algae-security-demo"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "algae-demo-app-a"
+path = "src/bin/demo-app-a.rs"
+
+[[bin]]
+name = "algae-demo-app-b"
+path = "src/bin/demo-app-b.rs"
