@@ -1,45 +1,73 @@
 #!/bin/sh
 set -eu
 
-export XDG_RUNTIME_DIR=/run/algae-weston
+# This session supervisor knows the Wayland socket contract, not compositor
+# implementation details. Select the compositor and its command line in the
+# root-owned config so the UI remains an independent Wayland client.
+CONFIG=/etc/algae/graphical-session.conf
+COMPOSITOR_BIN=/usr/bin/weston
+COMPOSITOR_ARGS="--backend=drm-backend.so --idle-time=0 --socket=wayland-0"
+WAYLAND_DISPLAY=wayland-0
+XDG_RUNTIME_DIR=/run/algae
+
+if [ -r "$CONFIG" ]; then
+	while IFS='=' read -r key value; do
+		case "$key" in
+			''|'#'*) continue ;;
+			ALGAE_COMPOSITOR_BIN) COMPOSITOR_BIN=$value ;;
+			ALGAE_COMPOSITOR_ARGS) COMPOSITOR_ARGS=$value ;;
+			ALGAE_WAYLAND_DISPLAY) WAYLAND_DISPLAY=$value ;;
+			ALGAE_XDG_RUNTIME_DIR) XDG_RUNTIME_DIR=$value ;;
+			*) echo "algae-graphical-session: unknown setting '$key'" >&2; exit 1 ;;
+		esac
+	done < "$CONFIG"
+fi
+
+case "$COMPOSITOR_BIN:$WAYLAND_DISPLAY:$XDG_RUNTIME_DIR" in
+	/*:wayland-*:/run/*) ;;
+	*) echo "algae-graphical-session: invalid compositor/session config" >&2; exit 1 ;;
+esac
+
+export XDG_RUNTIME_DIR WAYLAND_DISPLAY
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 0700 "$XDG_RUNTIME_DIR"
 
-# Weston can leave these behind after an interrupted shutdown. Remove stale
-# socket/lock files so the next compositor uses the expected display name.
-rm -f "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+# Remove stale socket/lock files left after an interrupted compositor exit.
+rm -f "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.lock"
 
-/usr/bin/weston --backend=drm-backend.so --idle-time=0 \
-	--socket=wayland-0 &
-WESTON_PID=$!
+# Args are a root-owned, whitespace-separated argv list; do not evaluate them
+# as shell code or allow pathname expansion.
+set -f
+set -- $COMPOSITOR_ARGS
+"$COMPOSITOR_BIN" "$@" &
+COMPOSITOR_PID=$!
 HOME_PID=
 
 stop_session() {
     [ -z "$HOME_PID" ] || kill "$HOME_PID" 2>/dev/null || true
-    kill "$WESTON_PID" 2>/dev/null || true
-    wait "$WESTON_PID" 2>/dev/null || true
+    kill "$COMPOSITOR_PID" 2>/dev/null || true
+    wait "$COMPOSITOR_PID" 2>/dev/null || true
 }
 trap stop_session EXIT HUP INT TERM
 
 tries=0
-while [ ! -S "$XDG_RUNTIME_DIR/wayland-0" ]; do
-    if ! kill -0 "$WESTON_PID" 2>/dev/null; then
-        wait "$WESTON_PID"
+while [ ! -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; do
+    if ! kill -0 "$COMPOSITOR_PID" 2>/dev/null; then
+        wait "$COMPOSITOR_PID"
         exit $?
     fi
     tries=$((tries + 1))
     if [ "$tries" -ge 100 ]; then
-        echo "algae-graphical-session: Weston socket did not appear" >&2
+        echo "algae-graphical-session: Wayland socket did not appear" >&2
         exit 1
     fi
     sleep 0.1
 done
 
 # Keep the early framebuffer animation visible while the service manager and
-# Weston initialize. Switch it off only when Weston is ready for the home app.
+# compositor initialize. Switch it off when the Wayland socket is ready.
 /etc/init.d/S01algae-splash stop
 
-export WAYLAND_DISPLAY=wayland-0
 /usr/bin/algae-home &
 HOME_PID=$!
 wait "$HOME_PID"

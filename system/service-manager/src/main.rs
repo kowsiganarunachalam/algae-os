@@ -758,7 +758,7 @@ fn load_services() -> Result<Vec<Service>, String> {
         {
             return Err(format!("Duplicate service name at line {}", index + 1));
         }
-        if (uid == 0) != (gid == 0) || (uid == 0 && fields[0] != "weston") {
+        if (uid == 0) != (gid == 0) || (uid == 0 && fields[0] != "graphical-session") {
             return Err(format!("Invalid privileged identity at line {}", index + 1));
         }
         services.push(Service::new(
