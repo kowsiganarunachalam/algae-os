@@ -39,3 +39,10 @@ management; at the serial console, control services with `algae-service status`,
 
 BusyBox init remains PID 1; the Algae service manager runs as a separate
 background process.
+
+### Boot style
+
+Choose **Settings** on the Algae home screen, then select Logo, Kelp, Pixel,
+or Sprig under “Boot style.” The choice is saved in `/etc/algae/boot-style`
+and used by the early framebuffer animation and the loading animation after
+Weston starts. The Logo style follows the Algae mark in the branding reference.

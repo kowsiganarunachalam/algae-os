@@ -4,10 +4,18 @@ PSPLASH=/usr/bin/psplash
 PSPLASH_WRITE=/usr/bin/psplash-write
 PIDFILE=/run/algae-psplash.pid
 PROGRESS_PIDFILE=/run/algae-psplash-progress.pid
+ANIMATION=/usr/bin/algae-boot-animation
+ANIMATION_PIDFILE=/run/algae-boot-animation.pid
 
 case "$1" in
     start)
-        [ -x "$PSPLASH" ] && [ -e /dev/fb0 ] || exit 0
+        [ -e /dev/fb0 ] || exit 0
+        if [ -x "$ANIMATION" ]; then
+            "$ANIMATION" &
+            echo $! > "$ANIMATION_PIDFILE"
+            exit 0
+        fi
+        [ -x "$PSPLASH" ] || exit 0
         "$PSPLASH" -n &
         echo $! > "$PIDFILE"
         sleep 1
@@ -26,11 +34,17 @@ case "$1" in
         fi
         ;;
     stop)
+        ANIMATION_WAS_RUNNING=0
+        if [ -f "$ANIMATION_PIDFILE" ]; then
+            ANIMATION_WAS_RUNNING=1
+            kill "$(cat "$ANIMATION_PIDFILE")" 2>/dev/null || true
+            rm -f "$ANIMATION_PIDFILE"
+        fi
         if [ -f "$PROGRESS_PIDFILE" ]; then
             kill "$(cat "$PROGRESS_PIDFILE")" 2>/dev/null || true
             rm -f "$PROGRESS_PIDFILE"
         fi
-        if [ -x "$PSPLASH_WRITE" ]; then
+        if [ "$ANIMATION_WAS_RUNNING" -eq 0 ] && [ -x "$PSPLASH_WRITE" ]; then
             "$PSPLASH_WRITE" "PROGRESS 100" 2>/dev/null || true
             "$PSPLASH_WRITE" "QUIT" 2>/dev/null || true
         fi

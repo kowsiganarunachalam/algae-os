@@ -5,4 +5,41 @@ export XDG_RUNTIME_DIR=/run/algae-weston
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 0700 "$XDG_RUNTIME_DIR"
 
-exec /usr/bin/weston --backend=drm-backend.so --idle-time=0
+# Weston can leave these behind after an interrupted shutdown. Remove stale
+# socket/lock files so the next compositor uses the expected display name.
+rm -f "$XDG_RUNTIME_DIR/wayland-0" "$XDG_RUNTIME_DIR/wayland-0.lock"
+
+/usr/bin/weston --backend=drm-backend.so --idle-time=0 \
+	--socket=wayland-0 &
+WESTON_PID=$!
+HOME_PID=
+
+stop_session() {
+    [ -z "$HOME_PID" ] || kill "$HOME_PID" 2>/dev/null || true
+    kill "$WESTON_PID" 2>/dev/null || true
+    wait "$WESTON_PID" 2>/dev/null || true
+}
+trap stop_session EXIT HUP INT TERM
+
+tries=0
+while [ ! -S "$XDG_RUNTIME_DIR/wayland-0" ]; do
+    if ! kill -0 "$WESTON_PID" 2>/dev/null; then
+        wait "$WESTON_PID"
+        exit $?
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 100 ]; then
+        echo "algae-graphical-session: Weston socket did not appear" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+
+# Keep the early framebuffer animation visible while the service manager and
+# Weston initialize. Switch it off only when Weston is ready for the home app.
+/etc/init.d/S01algae-splash stop
+
+export WAYLAND_DISPLAY=wayland-0
+/usr/bin/algae-home &
+HOME_PID=$!
+wait "$HOME_PID"

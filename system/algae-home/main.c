@@ -14,6 +14,16 @@
 #include <unistd.h>
 #include <wayland-client.h>
 #include "xdg-shell-client-protocol.h"
+#include "boot-styles.h"
+
+struct app;
+
+struct buffer_slot {
+	struct app *app;
+	struct wl_buffer *buffer;
+	void *pixels;
+	int busy;
+};
 
 struct app {
 	struct wl_display *display;
@@ -23,18 +33,107 @@ struct app {
 	struct wl_pointer *pointer;
 	struct xdg_wm_base *wm_base;
 	struct wl_surface *surface;
+	struct wl_surface *cursor_surface;
+	struct wl_buffer *cursor_buffer;
 	struct xdg_surface *xdg_surface;
 	struct xdg_toplevel *toplevel;
-	struct wl_buffer *buffer;
-	int buffer_busy, redraw_pending;
-	void *pixels;
-	size_t pixels_size;
-	int width, height, configured, selected, loading_done;
+	struct buffer_slot buffers[2];
+	int next_buffer, redraw_pending;
+	int width, height, configured, selected, page, loading_done;
 	double pointer_x, pointer_y;
 	struct timespec loading_started;
+	enum boot_style boot_style;
 };
 
 static void draw(struct app *app);
+
+static void create_pointer_cursor(struct app *app)
+{
+	const int width = 24, height = 32, stride = width * 4;
+	size_t size = (size_t)stride * height;
+	int fd = (int)syscall(SYS_memfd_create, "algae-cursor", 1U);
+	if (fd < 0 || ftruncate(fd, (off_t)size) < 0) {
+		if (fd >= 0)
+			close(fd);
+		return;
+	}
+	uint32_t *pixels = mmap(NULL, size, PROT_READ | PROT_WRITE,
+				MAP_SHARED, fd, 0);
+	if (pixels == MAP_FAILED) {
+		close(fd);
+		return;
+	}
+	cairo_surface_t *image = cairo_image_surface_create_for_data(
+		(unsigned char *)pixels, CAIRO_FORMAT_ARGB32,
+		width, height, stride);
+	cairo_t *cr = cairo_create(image);
+	cairo_set_operator(cr, CAIRO_OPERATOR_CLEAR);
+	cairo_paint(cr);
+	cairo_set_operator(cr, CAIRO_OPERATOR_OVER);
+	cairo_move_to(cr, 1, 1);
+	cairo_line_to(cr, 1, 25);
+	cairo_line_to(cr, 7, 19);
+	cairo_line_to(cr, 12, 30);
+	cairo_line_to(cr, 17, 28);
+	cairo_line_to(cr, 12, 17);
+	cairo_line_to(cr, 23, 17);
+	cairo_close_path(cr);
+	cairo_set_source_rgb(cr, 0.02, 0.08, 0.08);
+	cairo_fill(cr);
+	cairo_move_to(cr, 3, 4);
+	cairo_line_to(cr, 3, 21);
+	cairo_line_to(cr, 8, 16);
+	cairo_line_to(cr, 13, 27);
+	cairo_line_to(cr, 15, 26);
+	cairo_line_to(cr, 10, 15);
+	cairo_line_to(cr, 20, 15);
+	cairo_close_path(cr);
+	cairo_set_source_rgb(cr, 0.96, 1.0, 0.98);
+	cairo_fill(cr);
+	cairo_destroy(cr);
+	cairo_surface_destroy(image);
+
+	struct wl_shm_pool *pool = wl_shm_create_pool(app->shm, fd, (int)size);
+	app->cursor_buffer = wl_shm_pool_create_buffer(
+		pool, 0, width, height, stride, WL_SHM_FORMAT_ARGB8888);
+	app->cursor_surface = wl_compositor_create_surface(app->compositor);
+	wl_surface_attach(app->cursor_surface, app->cursor_buffer, 0, 0);
+	wl_surface_damage(app->cursor_surface, 0, 0, width, height);
+	wl_surface_commit(app->cursor_surface);
+	wl_shm_pool_destroy(pool);
+	munmap(pixels, size);
+	close(fd);
+}
+
+static enum boot_style load_boot_style(void)
+{
+	const char *env = getenv("ALGAE_BOOT_STYLE");
+	char name[32] = "";
+	if (env && *env)
+		return boot_style_from_name(env);
+	FILE *f = fopen("/etc/algae/boot-style", "r");
+	if (f) {
+		if (fscanf(f, "%31s", name) != 1)
+			name[0] = '\0';
+		fclose(f);
+	}
+	return boot_style_from_name(name);
+}
+
+static const char *boot_style_name(enum boot_style style)
+{
+	static const char *names[] = { "logo", "kelp", "pixel", "sprig" };
+	return names[style <= BOOT_STYLE_SPRIG ? style : BOOT_STYLE_LOGO];
+}
+
+static void save_boot_style(enum boot_style style)
+{
+	FILE *f = fopen("/etc/algae/boot-style", "w");
+	if (f) {
+		fprintf(f, "%s\n", boot_style_name(style));
+		fclose(f);
+	}
+}
 
 static void draw_text(cairo_t *cr, const char *text, double x, double y,
 		     double size, double r, double g, double b)
@@ -123,14 +222,23 @@ static void draw_loading(cairo_t *cr, double width, double height,
 
 static void draw(struct app *app)
 {
-	if (!app->configured || !app->buffer)
+	if (!app->configured)
 		return;
-	if (app->buffer_busy) {
+	struct buffer_slot *slot = NULL;
+	for (int offset = 0; offset < 2; offset++) {
+		int index = (app->next_buffer + offset) % 2;
+		if (!app->buffers[index].busy) {
+			slot = &app->buffers[index];
+			app->next_buffer = (index + 1) % 2;
+			break;
+		}
+	}
+	if (!slot) {
 		app->redraw_pending = 1;
 		return;
 	}
 	cairo_surface_t *image = cairo_image_surface_create_for_data(
-		app->pixels, CAIRO_FORMAT_ARGB32, app->width, app->height,
+		slot->pixels, CAIRO_FORMAT_ARGB32, app->width, app->height,
 		app->width * 4);
 	cairo_t *cr = cairo_create(image);
 	const double w = app->width, h = app->height;
@@ -142,13 +250,16 @@ static void draw(struct app *app)
 	cairo_pattern_destroy(gradient);
 	double elapsed = loading_seconds(app);
 	if (!app->loading_done && elapsed < 5.0) {
-		draw_loading(cr, w, h, elapsed);
+		if (app->boot_style == BOOT_STYLE_SPRIG)
+			draw_loading(cr, w, h, elapsed);
+		else
+			boot_style_draw(cr, w, h, elapsed, app->boot_style);
 		cairo_destroy(cr);
 		cairo_surface_destroy(image);
-		wl_surface_attach(app->surface, app->buffer, 0, 0);
+		wl_surface_attach(app->surface, slot->buffer, 0, 0);
 		wl_surface_damage(app->surface, 0, 0, app->width, app->height);
 		wl_surface_commit(app->surface);
-		app->buffer_busy = 1;
+		slot->busy = 1;
 		return;
 	}
 	app->loading_done = 1;
@@ -171,56 +282,93 @@ static void draw(struct app *app)
 	draw_text(cr, "Welcome. Your device is ready.", 74, 220, 19,
 		  0.68, 0.81, 0.79);
 
-	const char *titles[] = { "SERVICES", "APPLICATIONS", "SETTINGS" };
-	const char *subtitles[] = {
-		"Manage system services", "Your apps will live here", "Device preferences"
-	};
-	double margin = 72, gap = 22;
-	double card_w = (logical_w - margin * 2 - gap * 2) / 3;
-	for (int i = 0; i < 3; i++) {
-		double x = margin + i * (card_w + gap), y = 305, card_h = 220;
-		cairo_set_source_rgba(cr, 0.91, 0.97, 0.95,
-				      app->selected == i + 1 ? 0.20 : 0.10);
-		cairo_rectangle(cr, x, y, card_w, card_h);
-		cairo_fill(cr);
-		cairo_set_line_width(cr, 2);
-		cairo_set_source_rgba(cr, 0.43, 0.91, 0.72,
-				      app->selected == i + 1 ? 0.95 : 0.24);
-		cairo_rectangle(cr, x, y, card_w, card_h);
-		cairo_stroke(cr);
-		cairo_set_source_rgb(cr, 0.25, 0.82, 0.63);
-		cairo_arc(cr, x + 38, y + 45, 12, 0, 6.283185307);
-		cairo_fill(cr);
-		draw_text(cr, titles[i], x + 28, y + 104, 19, 0.94, 0.98, 0.96);
-		draw_text(cr, subtitles[i], x + 28, y + 142, 13, 0.66, 0.79, 0.77);
-	}
-
-	if (app->selected) {
-		const char *message = app->selected == 1 ?
-			"Services are managed with algae-service on the console." :
-			app->selected == 2 ? "The Algae application space is ready to grow." :
-			"Device settings are coming in a future milestone.";
-		draw_text(cr, message, 74, 590, 17, 0.78, 0.91, 0.87);
-	} else {
+	if (app->page == 0) {
+		const char *titles[] = { "SERVICES", "APPLICATIONS", "SETTINGS" };
+		const char *subtitles[] = {
+			"Manage system services", "Your apps will live here", "Device preferences"
+		};
+		double margin = 72, gap = 22;
+		double card_w = (logical_w - margin * 2 - gap * 2) / 3;
+		for (int i = 0; i < 3; i++) {
+			double x = margin + i * (card_w + gap), y = 305, card_h = 220;
+			cairo_set_source_rgba(cr, 0.91, 0.97, 0.95, 0.10);
+			cairo_rectangle(cr, x, y, card_w, card_h);
+			cairo_fill(cr);
+			cairo_set_line_width(cr, 2);
+			cairo_set_source_rgba(cr, 0.43, 0.91, 0.72, 0.24);
+			cairo_rectangle(cr, x, y, card_w, card_h);
+			cairo_stroke(cr);
+			cairo_set_source_rgb(cr, 0.25, 0.82, 0.63);
+			cairo_arc(cr, x + 38, y + 45, 12, 0, 6.283185307);
+			cairo_fill(cr);
+			draw_text(cr, titles[i], x + 28, y + 104, 19, 0.94, 0.98, 0.96);
+			draw_text(cr, subtitles[i], x + 28, y + 142, 13, 0.66, 0.79, 0.77);
+		}
 		draw_text(cr, "Select a tile to explore Algae OS", 74, 590, 17,
 			  0.78, 0.91, 0.87);
+	} else {
+		cairo_set_source_rgba(cr, 0.91, 0.97, 0.95, 0.10);
+		cairo_rectangle(cr, 72, 105, 124, 48);
+		cairo_fill(cr);
+		cairo_set_line_width(cr, 2);
+		cairo_set_source_rgba(cr, 0.43, 0.91, 0.72, 0.45);
+		cairo_rectangle(cr, 72, 105, 124, 48);
+		cairo_stroke(cr);
+		draw_text(cr, "<  HOME", 92, 135, 15, 0.94, 0.98, 0.96);
+		if (app->page == 1) {
+			draw_text(cr, "Services", 72, 220, 36, 0.96, 0.98, 0.97);
+			draw_text(cr, "System services", 74, 275, 18, 0.43, 0.91, 0.72);
+			draw_text(cr, "demo-service     clock-service     weston", 74, 325, 18,
+				  0.88, 0.95, 0.93);
+			draw_text(cr, "Check and control services from the console with:",
+				  74, 395, 17, 0.68, 0.81, 0.79);
+			draw_text(cr, "algae-service status", 74, 435, 17,
+				  0.78, 0.91, 0.87);
+		} else if (app->page == 2) {
+			draw_text(cr, "Applications", 72, 220, 36, 0.96, 0.98, 0.97);
+			draw_text(cr, "No applications are installed yet.", 74, 290, 20,
+				  0.78, 0.91, 0.87);
+			draw_text(cr, "This space is ready for Algae apps.", 74, 330, 17,
+				  0.68, 0.81, 0.79);
+		} else {
+			draw_text(cr, "Settings", 72, 220, 36, 0.96, 0.98, 0.97);
+			draw_text(cr, "Boot style", 74, 290, 18, 0.78, 0.91, 0.87);
+			const char *styles[] = { "LOGO", "KELP", "PIXEL", "SPRIG" };
+			for (int i = 0; i < 4; i++) {
+				double x = 74 + i * 148;
+				cairo_set_source_rgba(cr, 0.91, 0.97, 0.95,
+					app->boot_style == (enum boot_style)i ? 0.26 : 0.10);
+				cairo_rectangle(cr, x, 320, 132, 52);
+				cairo_fill(cr);
+				cairo_set_source_rgba(cr, 0.43, 0.91, 0.72,
+					app->boot_style == (enum boot_style)i ? 0.95 : 0.35);
+				cairo_set_line_width(cr, 2);
+				cairo_rectangle(cr, x, 320, 132, 52);
+				cairo_stroke(cr);
+				draw_text(cr, styles[i], x + 20, 352, 14,
+					0.94, 0.98, 0.96);
+			}
+			draw_text(cr, "The selected style is used on the next boot.",
+				  74, 420, 16, 0.68, 0.81, 0.79);
+		}
 	}
 	draw_text(cr, "QEMU ARM64  |  WAYLAND", 74, 748, 12,
 		  0.48, 0.67, 0.64);
 	cairo_restore(cr);
 	cairo_destroy(cr);
 	cairo_surface_destroy(image);
-	wl_surface_attach(app->surface, app->buffer, 0, 0);
+	wl_surface_attach(app->surface, slot->buffer, 0, 0);
 	wl_surface_damage(app->surface, 0, 0, app->width, app->height);
 	wl_surface_commit(app->surface);
-	app->buffer_busy = 1;
+	slot->busy = 1;
 }
 
 static void buffer_release(void *data, struct wl_buffer *buffer)
 {
 	(void)buffer;
-	struct app *app = data;
-	app->buffer_busy = 0;
+	struct buffer_slot *slot = data;
+	struct app *app = slot->app;
+	slot->busy = 0;
 	if (app->redraw_pending) {
 		app->redraw_pending = 0;
 		draw(app);
@@ -236,28 +384,32 @@ static void xdg_surface_configure(void *data, struct xdg_surface *surface,
 {
 	struct app *app = data;
 	xdg_surface_ack_configure(surface, serial);
-	if (!app->buffer) {
+	if (!app->buffers[0].buffer) {
 		int stride = app->width * 4;
-		app->pixels_size = (size_t)stride * app->height;
-		int fd = (int)syscall(SYS_memfd_create, "algae-home", 1U);
-		if (fd < 0 || ftruncate(fd, (off_t)app->pixels_size) < 0) {
-			perror("algae-home: create shared buffer");
-			exit(1);
+		size_t pixels_size = (size_t)stride * app->height;
+		for (int i = 0; i < 2; i++) {
+			struct buffer_slot *slot = &app->buffers[i];
+			int fd = (int)syscall(SYS_memfd_create, "algae-home", 1U);
+			if (fd < 0 || ftruncate(fd, (off_t)pixels_size) < 0) {
+				perror("algae-home: create shared buffer");
+				exit(1);
+			}
+			slot->pixels = mmap(NULL, pixels_size, PROT_READ | PROT_WRITE,
+					    MAP_SHARED, fd, 0);
+			if (slot->pixels == MAP_FAILED) {
+				perror("algae-home: mmap shared buffer");
+				exit(1);
+			}
+			struct wl_shm_pool *pool = wl_shm_create_pool(
+				app->shm, fd, (int)pixels_size);
+			slot->buffer = wl_shm_pool_create_buffer(
+				pool, 0, app->width, app->height, stride,
+				WL_SHM_FORMAT_ARGB8888);
+			slot->app = app;
+			wl_buffer_add_listener(slot->buffer, &buffer_listener, slot);
+			wl_shm_pool_destroy(pool);
+			close(fd);
 		}
-		app->pixels = mmap(NULL, app->pixels_size, PROT_READ | PROT_WRITE,
-				   MAP_SHARED, fd, 0);
-		if (app->pixels == MAP_FAILED) {
-			perror("algae-home: mmap");
-			exit(1);
-		}
-		struct wl_shm_pool *pool = wl_shm_create_pool(app->shm, fd,
-							      (int)app->pixels_size);
-		app->buffer = wl_shm_pool_create_buffer(pool, 0, app->width,
-							 app->height, stride,
-							 WL_SHM_FORMAT_ARGB8888);
-		wl_buffer_add_listener(app->buffer, &buffer_listener, app);
-		wl_shm_pool_destroy(pool);
-		close(fd);
 	}
 	if (!app->configured)
 		clock_gettime(CLOCK_MONOTONIC, &app->loading_started);
@@ -284,10 +436,12 @@ static void pointer_enter(void *data, struct wl_pointer *pointer,
 			  uint32_t serial, struct wl_surface *surface,
 			  wl_fixed_t x, wl_fixed_t y)
 {
-	(void)pointer; (void)serial; (void)surface;
+	(void)surface;
 	struct app *app = data;
 	app->pointer_x = wl_fixed_to_double(x);
 	app->pointer_y = wl_fixed_to_double(y);
+	if (app->cursor_surface)
+		wl_pointer_set_cursor(pointer, serial, app->cursor_surface, 1, 1);
 }
 
 static void pointer_leave(void *data, struct wl_pointer *pointer,
@@ -311,12 +465,14 @@ static void pointer_button(void *data, struct wl_pointer *pointer,
 {
 	(void)pointer; (void)serial; (void)time;
 	struct app *app = data;
+	fprintf(stderr, "[algae-home] button=%u state=%u pointer=(%.1f,%.1f) page=%d\n",
+		button, state, app->pointer_x, app->pointer_y, app->page);
 	if (button != BTN_LEFT || state != WL_POINTER_BUTTON_STATE_PRESSED)
 		return;
 	double scale = app->height / 800.0;
 	double x = app->pointer_x / scale;
 	double y = app->pointer_y / scale;
-	if (y >= 305 && y <= 525) {
+	if (app->page == 0 && y >= 305 && y <= 525) {
 		double logical_w = app->width / scale;
 		double gap = 22, margin = 72;
 		double card_w = (logical_w - margin * 2 - gap * 2) / 3;
@@ -324,11 +480,29 @@ static void pointer_button(void *data, struct wl_pointer *pointer,
 			double left = margin + i * (card_w + gap);
 			if (x >= left && x <= left + card_w) {
 				app->selected = i + 1;
+				app->page = i + 1;
 				draw(app);
 				break;
 			}
 		}
 	}
+	if (app->page != 0 && x >= 72 && x <= 196 && y >= 105 && y <= 153) {
+		app->page = 0;
+		app->selected = 0;
+		draw(app);
+	} else if (app->page == 3 && y >= 320 && y <= 372) {
+		for (int i = 0; i < 4; i++) {
+			double left = 74 + i * 148;
+			if (x >= left && x <= left + 132) {
+				app->boot_style = (enum boot_style)i;
+				save_boot_style(app->boot_style);
+				draw(app);
+				break;
+			}
+		}
+	}
+	fprintf(stderr, "[algae-home] click handled at logical=(%.1f,%.1f), page=%d\n",
+		x, y, app->page);
 }
 
 static void pointer_axis(void *data, struct wl_pointer *pointer,
@@ -337,12 +511,39 @@ static void pointer_axis(void *data, struct wl_pointer *pointer,
 	(void)data; (void)pointer; (void)time; (void)axis; (void)value;
 }
 
+static void pointer_frame(void *data, struct wl_pointer *pointer)
+{
+	(void)data; (void)pointer;
+}
+
+static void pointer_axis_source(void *data, struct wl_pointer *pointer,
+				uint32_t source)
+{
+	(void)data; (void)pointer; (void)source;
+}
+
+static void pointer_axis_stop(void *data, struct wl_pointer *pointer,
+			      uint32_t time, uint32_t axis)
+{
+	(void)data; (void)pointer; (void)time; (void)axis;
+}
+
+static void pointer_axis_discrete(void *data, struct wl_pointer *pointer,
+				  uint32_t axis, int32_t discrete)
+{
+	(void)data; (void)pointer; (void)axis; (void)discrete;
+}
+
 static const struct wl_pointer_listener pointer_listener = {
 	.enter = pointer_enter,
 	.leave = pointer_leave,
 	.motion = pointer_motion,
 	.button = pointer_button,
 	.axis = pointer_axis,
+	.frame = pointer_frame,
+	.axis_source = pointer_axis_source,
+	.axis_stop = pointer_axis_stop,
+	.axis_discrete = pointer_axis_discrete,
 };
 
 static void seat_capabilities(void *data, struct wl_seat *seat,
@@ -404,6 +605,7 @@ static const struct wl_registry_listener registry_listener = {
 int main(void)
 {
 	struct app app = { .width = 1280, .height = 800 };
+	app.boot_style = load_boot_style();
 	app.display = wl_display_connect(NULL);
 	if (!app.display) {
 		fprintf(stderr, "algae-home: cannot connect to Wayland compositor\n");
@@ -416,12 +618,14 @@ int main(void)
 		fprintf(stderr, "algae-home: compositor lacks required Wayland globals\n");
 		return 1;
 	}
+	create_pointer_cursor(&app);
 	app.surface = wl_compositor_create_surface(app.compositor);
 	app.xdg_surface = xdg_wm_base_get_xdg_surface(app.wm_base, app.surface);
 	xdg_surface_add_listener(app.xdg_surface, &xdg_surface_listener, &app);
 	app.toplevel = xdg_surface_get_toplevel(app.xdg_surface);
 	xdg_toplevel_set_title(app.toplevel, "Algae OS");
 	xdg_toplevel_set_app_id(app.toplevel, "org.algae.home");
+	xdg_toplevel_set_fullscreen(app.toplevel, NULL);
 	/* The first commit causes Weston to send the initial xdg configure. */
 	wl_surface_commit(app.surface);
 	struct pollfd display_fd = {
@@ -450,7 +654,8 @@ int main(void)
 		} else if (ready > 0 &&
 			   (display_fd.revents & (POLLERR | POLLHUP | POLLNVAL))) {
 			break;
-		} else if (app.configured && !app.loading_done) {
+		}
+		if (app.configured && !app.loading_done) {
 			draw(&app);
 		}
 	}

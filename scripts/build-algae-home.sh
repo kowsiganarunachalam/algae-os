@@ -7,6 +7,8 @@ STAGING_DIR="$BUILDROOT_DIR/output/staging"
 HOST_DIR="$BUILDROOT_DIR/output/host"
 SOURCE="$PROJECT_DIR/system/algae-home/main.c"
 OUTPUT="$PROJECT_DIR/rootfs/overlay/usr/bin/algae-home"
+BOOT_SOURCE="$PROJECT_DIR/system/algae-home/boot-animation.c"
+BOOT_OUTPUT="$PROJECT_DIR/rootfs/overlay/usr/bin/algae-boot-animation"
 PROTOCOL="$STAGING_DIR/usr/share/wayland-protocols/stable/xdg-shell/xdg-shell.xml"
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT HUP INT TERM
@@ -40,3 +42,22 @@ PKG_CONFIG_SYSROOT_DIR="$STAGING_DIR" \
 
 chmod 0755 "$OUTPUT"
 echo "Built $OUTPUT"
+
+PKG_CONFIG_PATH="$STAGING_DIR/usr/lib/pkgconfig" \
+PKG_CONFIG_LIBDIR="$STAGING_DIR/usr/lib/pkgconfig" \
+PKG_CONFIG_SYSROOT_DIR="$STAGING_DIR" \
+	"$HOST_DIR/bin/aarch64-buildroot-linux-gnu-gcc" -O2 -Wall -Wextra \
+	-I"$PROJECT_DIR/system/algae-home" \
+	$(PKG_CONFIG_PATH="$STAGING_DIR/usr/lib/pkgconfig" \
+	  PKG_CONFIG_LIBDIR="$STAGING_DIR/usr/lib/pkgconfig" \
+	  PKG_CONFIG_SYSROOT_DIR="$STAGING_DIR" \
+	  pkg-config --cflags cairo) \
+	"$BOOT_SOURCE" \
+	$(PKG_CONFIG_PATH="$STAGING_DIR/usr/lib/pkgconfig" \
+	  PKG_CONFIG_LIBDIR="$STAGING_DIR/usr/lib/pkgconfig" \
+	  PKG_CONFIG_SYSROOT_DIR="$STAGING_DIR" \
+	  pkg-config --libs cairo) \
+	-lm -o "$BOOT_OUTPUT"
+
+chmod 0755 "$BOOT_OUTPUT"
+echo "Built $BOOT_OUTPUT"
