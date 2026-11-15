@@ -1,0 +1,5 @@
+# Locked service and demonstration identities with stable numeric IDs.
+algae-demo 2000 algae-demo 2000 * /var/lib/algae/demo /bin/false - Algae demo service
+algae-clock 2001 algae-clock 2001 * /var/lib/algae/clock /bin/false - Algae clock service
+algae-app-a 2010 algae-app-a 2010 * /var/lib/algae/apps/demo-app-a /bin/false - Algae demo app A
+algae-app-b 2011 algae-app-b 2011 * /var/lib/algae/apps/demo-app-b /bin/false - Algae demo app B
